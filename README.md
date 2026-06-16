@@ -1,342 +1,317 @@
 # my-arch-environment
 
-Will contain the build process of my machines, including manual installation, configurations, and dependencies.
+Consolidated Arch Linux install guide for my personal machines — built for development, whether learning to code or freelancing.
 
-> I am consolidating 4 Arch guides into 1 for my own computers. I will document all 4 guides and choose the best options for my own use case from each.
-
----
-
-## Goal
-
-The goal of this Arch Linux install is to build a safe and capable machine for development, whether for learning to code or freelancing.
+> Based on: (YouTube Guides)
+> Learn Linux TV (May 28th, 2026) - How to Install Arch Linux in 2026 - The Complete Step-by-Step Guide
+> Josean Martinez (May 5th, 2026) - The Only Arch Linux Installation Guide You'll Ever Need
+> DistroTube (Feb 10th, 2026) - An Arch Linux Installation Guide (2026)
+> Bread on Penguins (Sep 25th, 2024) - Beginner friendly ARCH LINUX Installation Guide and Walkthrough
 
 ---
 
 ## Pre-Installation
 
-Before booting, **disable Secure Boot** in your BIOS/UEFI settings, then boot into your Arch ISO via USB.
-
----
-
-## Initial Setup
-
-### Increase Terminal Font Size
+Disable **Secure Boot** in BIOS/UEFI, then boot into the Arch ISO from USB.
 
 ```bash
-setfont ter-132b
+setfont ter-132b        # increase terminal font size
+timedatectl set-ntp true
 ```
 
-### Verify UEFI Mode
+**Verify UEFI mode** — should output `64`:
 
 ```bash
 cat /sys/firmware/efi/fw_platform_size
 ```
 
-> Should output `64` for 64-bit UEFI. If it outputs `32` or the file doesn't exist, you may be booted in BIOS/legacy mode.
-
-### Check Network Interfaces
-
-```bash
-ip link
-```
-
-> `wlan0` will show as `DOWN` initially. It will show as `UP` once connected.
-
 ---
 
 ## Connect to Wi-Fi
-
-Enter the `iwd` wireless daemon:
 
 ```bash
 iwctl
 ```
 
-Then run the following inside the `iwd` prompt — replace `name` with your device name (e.g. `wlan0`) and `SSID` with your network name:
+Inside the `iwd` prompt (replace `wlan0` and `SSID` with yours):
 
-iwd: device list
-iwd: station name scan
-iwd: station name get-networks
-iwd: station name connect SSID
-
-> `station name scan` produces no output, but it initiates a background network scan.
-
-Exit `iwctl`, then verify the connection:
-
-```bash
-ping ping.archlinux.org
+```
+device list
+station wlan0 scan
+station wlan0 get-networks
+station wlan0 connect SSID
 ```
 
-Press `Ctrl+C` to stop. Confirm your interface is now up:
+Exit, then verify:
 
 ```bash
-ip link
+ping -c 3 archlinux.org
 ```
 
-# Arch Linux Installation Guide
+---
 
-> Based on Learn Linux TV (May 28th, 2026) — The Manual Method
+## Update Mirrors
+
+```bash
+pacman -Sy reflector
+reflector --country US --latest 5 --sort rate --save /etc/pacman.d/mirrorlist
+```
 
 ---
 
 ## Table of Contents
 
-1. [Partitioning the Drive](#1-partitioning-the-drive)
-2. [Formatting Partitions](#2-formatting-partitions)
-3. [Encrypting and Setting Up LVM](#3-encrypting-and-setting-up-lvm)
-4. [Mounting](#4-mounting)
-5. [Installing Base Packages](#5-installing-base-packages)
-6. [Entering the Chroot Environment](#6-entering-the-chroot-environment)
-7. [Kernels](#7-kernels)
-8. [GPU Drivers](#8-gpu-drivers)
-9. [Configuring mkinitcpio](#9-configuring-mkinitcpio)
-10. [Locale Setup](#10-locale-setup)
+1. [Partition the Drive](#1-partition-the-drive)
+2. [Format Partitions](#2-format-partitions)
+3. [Encrypt and Set Up Btrfs](#3-encrypt-and-set-up-btrfs)
+4. [Mount](#4-mount)
+5. [Install Base Packages](#5-install-base-packages)
+6. [Enter Chroot](#6-enter-chroot)
+7. [System Configuration](#7-system-configuration)
+8. [ZRAM Setup](#8-zram-setup)
+9. [GPU Drivers](#9-gpu-drivers)
+10. [Configure mkinitcpio](#10-configure-mkinitcpio)
 11. [GRUB Setup](#11-grub-setup)
-12. [Enabling Services and Rebooting](#12-enabling-services-and-rebooting)
+12. [Install Desktop Environment](#12-install-desktop-environment)
+13. [Enable Services and Reboot](#13-enable-services-and-reboot)
 
 ---
 
-## 1. Partitioning the Drive
+## 1. Partition the Drive
 
 ```bash
-fdisk /dev/nvme0n1
+gdisk /dev/nvme0n1
 ```
 
-> **Note:** If prompted to remove an existing signature, press `Y`.
+> If prompted to remove an existing signature, press `Y`.
 
-Inside `fdisk`, run the following commands:
+Delete all existing partitions by pressing `d` repeatedly, then create two new ones:
 
-| Command | Action                           |
-| ------- | -------------------------------- |
-| `g`     | Create a new GPT partition table |
-| `n`     | New partition                    |
-| `w`     | Write changes and exit           |
+**EFI partition:**
 
-### Partition Layout
+```
+n → 1 → (default) → +2G → EF00
+```
 
-**Create the partition layout**
+**Linux partition** (LUKS container — rest of drive):
 
-Command: g
+```
+n → 2 → (default) → (default) → (default)
+```
 
-**EFI Partition**
+Write changes:
 
-Command: n
-Partition number: 1 (or default)
-First sector: (default)
-Last sector: +1G
+```
+w
+```
 
-**Boot Partition**
-
-Command: n
-Partition number: 2 (or default)
-First sector: (default)
-Last sector: +1G
-
-**Linux Partition**
-
-Command: n
-Partition number: 3 (or default)
-First sector: (default)
-Last sector: (default — uses remaining space)
-
-**Write the partition table:**
-
-Command: w
-
-> ⚠️ **Warning:** Writing immediately wipes the drive and applies your new partition layout.
+> ⚠️ This immediately wipes the drive.
 
 ---
 
-## 2. Formatting Partitions
-
-Format the EFI partition as FAT32:
+## 2. Format Partitions
 
 ```bash
 mkfs.fat -F32 /dev/nvme0n1p1
 ```
 
-Format the boot partition as ext4:
-
-```bash
-mkfs.ext4 /dev/nvme0n1p2
-```
-
-> **Note:** Do **not** format the Linux partition yet if you plan to encrypt it. See the next section.
+> Do **not** format `/dev/nvme0n1p2` — it will be encrypted next.
 
 ---
 
-## 3. Encrypting and Setting Up LVM
+## 3. Encrypt and Set Up Btrfs
 
-> Skip this section if you do not want full-disk encryption.
-
-### Encrypt the Linux Partition
+> Skip this section if you don't want full-disk encryption.
 
 ```bash
-cryptsetup luksFormat /dev/nvme0n1p3
+cryptsetup luksFormat /dev/nvme0n1p2
 ```
 
-When prompted:
-
-- Type `YES` (uppercase) to confirm
-- Enter and verify a passphrase — **do not forget it, or your data will be permanently inaccessible**
-
-### Open the Encrypted Volume
+Type `YES` (uppercase) and set a passphrase. **Don't lose it — your data will be permanently inaccessible without it.**
 
 ```bash
-cryptsetup open --type luks /dev/nvme0n1p3 lvm
+cryptsetup open /dev/nvme0n1p2 cryptroot
 ```
 
-Verify it opened successfully:
+Format and create subvolumes:
 
 ```bash
-ls -l /dev/mapper
-```
+mkfs.btrfs /dev/mapper/cryptroot
+mount /dev/mapper/cryptroot /mnt
 
-### Set Up LVM
+btrfs subvolume create /mnt/@
+btrfs subvolume create /mnt/@home
+btrfs subvolume create /mnt/@snapshots
+btrfs subvolume create /mnt/@var_log
 
-```bash
-pvcreate /dev/mapper/lvm
-vgcreate volgroup0 /dev/mapper/lvm
-lvcreate -L 30GB volgroup0 -n lv_root
-lvcreate -L 400GB volgroup0 -n lv_home   # Adjust to your drive size; leave headroom
-```
-
-### Activate LVM
-
-```bash
-modprobe dm_mod
-vgscan
-vgchange -ay
-```
-
-### Format the Logical Volumes
-
-```bash
-mkfs.ext4 /dev/volgroup0/lv_root
-mkfs.ext4 /dev/volgroup0/lv_home
+umount /mnt
 ```
 
 ---
 
-## 4. Mounting
+## 4. Mount
 
 ```bash
-mount /dev/volgroup0/lv_root /mnt
-
-mkdir /mnt/boot
-mount /dev/nvme0n1p2 /mnt/boot
-
-mkdir /mnt/home
-mount /dev/volgroup0/lv_home /mnt/home
+mount -o compress=zstd,subvol=@ /dev/mapper/cryptroot /mnt
+mkdir -p /mnt/{home,.snapshots,var/log,boot}
+mount -o subvol=@home /dev/mapper/cryptroot /mnt/home
+mount -o subvol=@snapshots /dev/mapper/cryptroot /mnt/.snapshots
+mount -o subvol=@var_log /dev/mapper/cryptroot /mnt/var/log
+mount /dev/nvme0n1p1 /mnt/boot
 ```
 
 ---
 
-## 5. Installing Base Packages
+## 5. Install Base Packages
 
 ```bash
-pacstrap -i /mnt base
+pacstrap -K /mnt base linux linux-headers linux-lts linux-lts-headers linux-firmware networkmanager nano vim vi base-devel amd-ucode grub efibootmgr os-prober
 ```
 
-Accept the defaults and type `y` to proceed.
-
-Generate the fstab:
+Generate fstab:
 
 ```bash
 genfstab -U -p /mnt >> /mnt/etc/fstab
-```
-
-Verify it looks correct:
-
-```bash
-cat /mnt/etc/fstab
+cat /mnt/etc/fstab   # verify it looks correct
 ```
 
 ---
 
-## 6. Entering the Chroot Environment
+## 6. Enter Chroot
 
 ```bash
 arch-chroot /mnt
 ```
 
-### Set the Root Password
+---
+
+## 7. System Configuration
+
+### Timezone
+
+```bash
+ln -sf /usr/share/zoneinfo/America/Phoenix /etc/localtime
+hwclock --systohc
+```
+
+> Find your timezone with `timedatectl list-timezones`. Note: `America/Phoenix` never observes DST.
+
+### Locale
+
+```bash
+nano /etc/locale.gen
+```
+
+Uncomment `en_US.UTF-8 UTF-8` and `en_US ISO-8859-1`, save (`Ctrl+O`, `Enter`, `Ctrl+X`), then:
+
+```bash
+locale-gen
+echo "LANG=en_US.UTF-8" > /etc/locale.conf
+```
+
+### Hostname
+
+```bash
+echo "thinkpad" > /etc/hostname
+```
+
+### Root Password
 
 ```bash
 passwd
 ```
 
-### Create a Local User
+### Create a User
 
 ```bash
 useradd -m -g users -G wheel yourusername
 passwd yourusername
 ```
 
-> Replace `yourusername` with your desired username.
-
-### Install Essential Packages
+### Configure sudo
 
 ```bash
-pacman -S base-devel dosfstools grub efibootmgr gnome gnome-tweaks lvm2 mtools nano networkmanager os-prober sudo openssh
+EDITOR=nano visudo
 ```
 
-> - Replace `gnome gnome-tweaks` with your preferred desktop environment.
-> - Replace `nano` with `vim` or another editor if preferred.
-> - `openssh` is optional — only needed if you want to SSH into this machine.
-> - If prompted to choose between `jack` and `pipewire-jack`, select **pipewire-jack**.
+Uncomment:
 
-Enable SSH if installed:
+```
+%wheel ALL=(ALL:ALL) ALL
+```
+
+### Essential Packages
 
 ```bash
-systemctl enable sshd
+pacman -S dosfstools efibootmgr mtools networkmanager sudo openssh git zram-generator
 ```
 
 ---
 
-## 7. Kernels
+## 8. ZRAM Setup
 
 ```bash
-pacman -S linux linux-headers linux-lts linux-lts-headers
+nano /etc/systemd/zram-generator.conf
 ```
 
-Accept the defaults.
+Add:
+
+```ini
+[zram0]
+zram-size = ram / 2
+compression-algorithm = zstd
+swap-priority = 100
+```
+
+> Creates compressed swap in RAM using half your system RAM. No swap partition needed.
 
 ---
 
-## 8. GPU Drivers
+## 9. GPU Drivers
 
-Check which GPU you have:
-
-```bash
-lspci
-```
-
-Look for the **Display controller** entry.
-
-**AMD:**
+Check your GPU:
 
 ```bash
-pacman -S mesa
-# or for Vulkan support:
-pacman -S vulkan-radeon lib32-vulkan-radeon
+lspci | grep -i display
 ```
 
-> For NVIDIA or Intel, substitute the appropriate driver packages.
+Enable the **multilib** repository (required for `lib32` packages):
+
+```bash
+nano /etc/pacman.conf
+```
+
+Uncomment both lines:
+
+```
+[multilib]
+Include = /etc/pacman.d/mirrorlist
+```
+
+Then sync and install AMD drivers:
+
+```bash
+pacman -Sy
+pacman -S mesa vulkan-radeon libva-mesa-driver lib32-mesa lib32-vulkan-radeon
+```
+
+> Covers OpenGL, Vulkan, and 32-bit compatibility (Steam/Wine).
 
 ---
 
-## 9. Configuring mkinitcpio
+## 10. Configure mkinitcpio
 
 ```bash
 nano /etc/mkinitcpio.conf
 ```
 
-Find the line starting with `HOOKS=` (the uncommented one) and insert `sd-encrypt lvm2` between `block` and `filesystems`:
+Set the `HOOKS` line to:
 
-HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt lvm2 filesystems fsck)
+```
+HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck)
+```
 
-Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X`), then rebuild the initramfs:
+Rebuild the initramfs:
 
 ```bash
 mkinitcpio -p linux
@@ -345,76 +320,64 @@ mkinitcpio -p linux-lts
 
 ---
 
-## 10. Locale Setup
-
-```bash
-nano /etc/locale.gen
-```
-
-Uncomment your locale (e.g., `en_US.UTF-8 UTF-8`), then save and exit.
-
-Generate the locale:
-
-```bash
-locale-gen
-```
-
----
-
 ## 11. GRUB Setup
 
-### Get the UUID of the Encrypted Partition
+Get the UUID of the encrypted partition:
 
 ```bash
-echo "rd.luks.name=$(blkid -s UUID -o value /dev/nvme0n1p3)=lvm"
+blkid -s UUID -o value /dev/nvme0n1p2
 ```
 
-Copy the output.
-
-### Edit the GRUB Config
+Edit the GRUB config:
 
 ```bash
 nano /etc/default/grub
 ```
 
-Find `GRUB_CMDLINE_LINUX=""` and update it with the output from above, plus the root volume:
+Set `GRUB_CMDLINE_LINUX` using your UUID:
 
-GRUB_CMDLINE_LINUX="rd.luks.name=<YOUR-UUID>=lvm root=/dev/volgroup0/lv_root"
-
-Save and exit.
-
-### Install GRUB
-
-```bash
-mkdir /boot/EFI
-mount /dev/nvme0n1p1 /boot/EFI
-grub-install --target=x86_64-efi --bootloader-id=grub_uefi --recheck
+```
+GRUB_CMDLINE_LINUX="rd.luks.name=<YOUR-UUID>=cryptroot root=/dev/mapper/cryptroot"
 ```
 
-### Copy Locale and Generate Config
+Install GRUB and generate the config:
 
 ```bash
+grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=grub_uefi --recheck
 cp /usr/share/locale/en\@quot/LC_MESSAGES/grub.mo /boot/grub/locale/en.mo
 grub-mkconfig -o /boot/grub/grub.cfg
 ```
 
 ---
 
-## 12. Enabling Services and Rebooting
+## 12. Install Desktop Environment
 
 ```bash
-systemctl enable gdm
-systemctl enable NetworkManager
-exit
+pacman -S plasma kde-applications sddm sddm-kcm pipewire pipewire-alsa pipewire-pulse wireplumber
 ```
 
-Unmount everything and reboot:
-
-```bash
-umount -a
-reboot
-```
+> - Wayland is built into `plasma` (KDE 6+) — no separate session package needed.
+> - `kde-applications` is a large metapackage; swap in individual apps for a minimal install.
+> - `pipewire` replaces PulseAudio.
+> - If prompted, choose: gstreamer, pipewire-jack, noto-fonts, python-pyqt6, cronie, tessdata-eng.
 
 ---
 
-🎉 **Congratulations! Arch Linux is installed.**
+## 13. Enable Services and Reboot
+
+```bash
+systemctl enable sddm
+systemctl enable NetworkManager
+exit
+
+umount -R /mnt
+reboot
+```
+
+> Remove the USB drive when the machine restarts. You'll be prompted for your LUKS passphrase on boot.
+
+---
+
+🎉 **Arch Linux is installed.**
+
+On first login: **System Settings → Session** → confirm Wayland is selected. NetworkManager handles Wi-Fi from the KDE system tray.
