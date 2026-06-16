@@ -426,7 +426,7 @@ systemctl enable firewalld         # firewall
 systemctl enable reflector.timer   # automatic mirror ranking
 systemctl enable acpid             # ACPI events (lid close, power button, etc.)
 systemctl enable fstrim.timer      # weekly SSD TRIM
-systemctl enable ly.service        # display manager
+systemctl enable ly@tty2.service   # display manager
 ```
 
 Exit chroot and reboot:
